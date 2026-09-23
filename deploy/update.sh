@@ -9,9 +9,20 @@ set -euo pipefail
 APP_DIR=/srv/book-search
 APP_USER=books
 
+# SECURITY: the checkout is owned by root and the app account cannot write to
+# it. Deploys run git, npm and the build as root, so anything the app account
+# could modify - git hooks, git config, package scripts - would execute with
+# root privileges on the next release. Making the tree read-only to the app
+# removes that path. Do NOT add a git safe.directory exception here; needing
+# one means ownership has drifted back and the escalation path is open again.
 cd "$APP_DIR"
-# Files are owned by the app user but deploys run as root.
-git config --global --add safe.directory "$APP_DIR" 2>/dev/null || true
+OWNER=$(stat -c '%U' "$APP_DIR")
+if [ "$OWNER" != "root" ]; then
+  echo "REFUSING: $APP_DIR is owned by '$OWNER', not root."
+  echo "  An app-account compromise would become root at the next deploy."
+  echo "  Fix: chown -R root:root $APP_DIR && chmod -R go-w $APP_DIR"
+  exit 1
+fi
 
 echo "==> pulling"
 git fetch --quiet origin
@@ -24,7 +35,11 @@ npm ci --omit=dev --no-fund --no-audit 2>&1 | tail -2
 echo "==> building"
 npm run build 2>&1 | tail -2
 
-chown -R "$APP_USER:$APP_USER" "$APP_DIR"
+# Code stays root-owned and read-only to the app account. Only runtime state
+# is writable, and it lives outside the checkout.
+chown -R root:root "$APP_DIR"
+chmod -R go-w "$APP_DIR"
+install -d -o "$APP_USER" -g "$APP_USER" -m 755 /var/lib/books
 
 echo "==> restarting"
 systemctl restart books

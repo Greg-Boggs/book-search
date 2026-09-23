@@ -45,9 +45,14 @@ lists files carry no ISBNs at all, so this dump is the only join path.
 
 ## Our own catalog via libilsws
 
-We have live ILSWS access to the Multnomah catalog through `libilsws`, which we wrote. Test
-instance is `multcolibtest_ilsws` on `sdws06.sirsidynix.net`; config lives in
-`libmain_webform_symphony`. Probe project is `ilsws/` (ddev, php 8.3).
+We have live ILSWS access to the Multnomah catalog through `libilsws`, which we wrote. The
+probe runs against the **test** instance, never production. Connection details and credentials
+live outside this repo, in the config the webform module already uses. Probe project is
+`~/sites/ilsws` (ddev, php 8.3), kept separate from this one.
+
+ILSWS credentials are privileged and can write to the catalog, so probes are restricted to the
+read-only call set (`connect`, `getCatalogIndexes`, `searchBib`, `getBib`, `getBibMarc`,
+`getBibCircInfo`) and carry a hard request budget that throws rather than warns.
 
 This is a **richness oracle for a sample, not a corpus to harvest** — it's a demo app, and SPL is
 already the collection. Look an SPL record up by ISBN, pull its full MARC, compare.

@@ -99,3 +99,48 @@ describe("path-encoded search (CDN-safe)", () => {
     expect(res.status).toBe(400);
   });
 });
+
+/**
+ * End-to-end guards for the security findings: the API must not let a caller
+ * reach Solr syntax, page arbitrarily deep, or submit unbounded input.
+ */
+describe("API input hardening", () => {
+  const enc = (o: Record<string, unknown>) =>
+    Buffer.from(JSON.stringify(o)).toString("base64url");
+  const get = (o: Record<string, unknown>) =>
+    fetch(`${BASE}/api/search/${enc(o)}`).then((r) => r.json()) as Promise<any>;
+
+  it("ignores an injected function query instead of running it", async () => {
+    const clean = await get({ q: "cooking", r: 1 });
+    const dirty = await get({ q: "cooking", r: 1, f: ["{!frange l=0}pow(copies,10)"] });
+    expect(dirty.numFound).toBe(clean.numFound);
+  });
+
+  it("ignores a filter on a non-facetable field", async () => {
+    const clean = await get({ q: "cooking", r: 1 });
+    const dirty = await get({ q: "cooking", r: 1, f: ['title:"zzzznotathing"'] });
+    expect(dirty.numFound).toBe(clean.numFound);
+  });
+
+  it("caps deep pagination", async () => {
+    const r = await get({ q: "cooking", r: 1, s: 5_000_000 });
+    expect(r.error).toBeUndefined();
+  });
+
+  it("caps row count", async () => {
+    const r = await get({ q: "cooking", r: 100000 });
+    expect(r.hits.length).toBeLessThanOrEqual(100);
+  });
+
+  it("survives a very long query string", async () => {
+    const r = await get({ q: "a".repeat(5000), r: 1 });
+    expect(r.error).toBeUndefined();
+  });
+
+  it("still applies a legitimate facet filter", async () => {
+    const all = await get({ q: "cooking", r: 1 });
+    const filtered = await get({ q: "cooking", r: 1, f: ['formats:"bk"'] });
+    expect(filtered.numFound).toBeGreaterThan(0);
+    expect(filtered.numFound).toBeLessThanOrEqual(all.numFound);
+  });
+});

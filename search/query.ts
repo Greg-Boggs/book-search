@@ -1,4 +1,5 @@
 /** Query construction and the fuzzy fallback. */
+import { parseSelections, toFilterQueries, LIMITS } from "./filters.js";
 const BASE = process.env.SOLR_URL ?? "http://solr:8983/solr";
 const CORE = process.env.SOLR_CORE ?? "bibs";
 
@@ -22,6 +23,10 @@ export interface SearchOpts {
   q: string;
   rows?: number;
   start?: number;
+  /**
+   * Facet selections as `field:value`. Validated against an allowlist and
+   * rendered into Solr syntax server-side - never forwarded as raw `fq`.
+   */
   filters?: string[];
   /**
    * Demo curation: hide reference/microform/periodicals, collapse format
@@ -62,8 +67,10 @@ function params(o: SearchOpts, q: string, mm: string): URLSearchParams {
     boost: curated
       ? "product(log(sum(def(copies,0),2)),if(has_cover,1.25,1))"
       : "log(sum(def(copies,0),2))",
-    rows: String(o.rows ?? 24),
-    start: String(o.start ?? 0),
+    rows: String(Math.min(Math.max(o.rows ?? 24, 1), LIMITS.rowsMax)),
+    start: String(Math.min(Math.max(o.start ?? 0, 0), LIMITS.startMax)),
+    // Server-side ceiling so no single query can pin a Solr thread.
+    timeAllowed: String(LIMITS.timeAllowedMs),
     fl: "id,title,title_full,author,year,publisher,subjects,formats,locations,isbn,copies,circulating,score",
     wt: "json",
     "facet": "true",
@@ -82,7 +89,8 @@ function params(o: SearchOpts, q: string, mm: string): URLSearchParams {
     // One row per work, keeping the copy most likely to look good.
     p.append("fq", "{!collapse field=work_key sort='has_cover desc,copies desc'}");
   }
-  for (const f of o.filters ?? []) p.append("fq", f);
+  // Built here from validated selections; the client never supplies Solr syntax.
+  for (const f of toFilterQueries(parseSelections(o.filters))) p.append("fq", f);
   return p;
 }
 
@@ -101,7 +109,9 @@ function fuzzify(q: string): string {
 }
 
 async function run(p: URLSearchParams): Promise<any> {
-  const res = await fetch(`${BASE}/${CORE}/select?${p}`);
+  const res = await fetch(`${BASE}/${CORE}/select?${p}`, {
+    signal: AbortSignal.timeout(LIMITS.fetchTimeoutMs),
+  });
   if (!res.ok) throw new Error(`solr ${res.status}`);
   return res.json();
 }
@@ -126,7 +136,8 @@ function readFacets(j: any): Record<string, [string, number][]> {
 }
 
 export async function search(o: SearchOpts): Promise<SearchResult> {
-  const q = o.q.trim();
+  // Bound the input before it reaches the query parser.
+  const q = o.q.trim().slice(0, LIMITS.qMaxLength);
   if (!q) return { hits: [], numFound: 0, qtime: 0, fuzzy: false, facets: {} };
 
   let j = await run(params(o, q, MM));

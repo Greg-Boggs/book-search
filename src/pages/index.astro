@@ -231,8 +231,11 @@ const SYNDETICS_CLIENT = document.body.dataset.syndetics || "";
 let filters = new Set();
 let timer, seq = 0, shown = TOTAL;
 
-const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) =>
-  ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+// Escapes BOTH quote characters. Omitting the apostrophe let a facet value
+// containing one break out of a single-quoted attribute and become an event
+// handler - a stored-XSS route through catalogue data.
+const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) =>
+  ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 
 // Animate the count rather than snapping - the collection reshaping is the point.
 // rAF is throttled in background tabs, so fall back to setting it outright;
@@ -292,105 +295,33 @@ function renderFacets(f) {
     ["Audience", "audiences", (v) => v[0].toUpperCase() + v.slice(1)],
     ["Branch", "locations", (v) => v],
   ];
-  $facets.innerHTML = groups.map(([label, field, fmt]) => {
+  // Built as DOM nodes, not markup. Facet values come from catalogue data and
+  // must never be parsed as HTML, whatever they contain.
+  $facets.replaceChildren();
+  for (const [label, field, fmt] of groups) {
     const rows = (f[field] ?? []).slice(0, 8);
-    if (!rows.length) return "";
-    return `<div class="facet"><h2>${label}</h2>${rows.map(([v, n]) => {
+    if (!rows.length) continue;
+    const wrap = document.createElement("div");
+    wrap.className = "facet";
+    const h = document.createElement("h2");
+    h.textContent = label;
+    wrap.append(h);
+    for (const [v, n] of rows) {
       const key = `${field}:"${v}"`;
-      return `<button aria-pressed="${filters.has(key)}" data-f='${esc(key)}'>
-        <span>${esc(fmt(v))}</span><span class="n">${n.toLocaleString()}</span></button>`;
-    }).join("")}</div>`;
-  }).join("");
-}
-
-const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-
-/**
- * Search params go in the PATH, not the query string: the CDN in front of
- * production strips `?a=b` before requests reach the origin. Mirrors
- * search/params.ts - keep the two in step.
- */
-function encodeSearch(p) {
-  const c = { q: p.q };
-  if (p.rows !== undefined) c.r = p.rows;
-  if (p.start) c.s = p.start;
-  if (p.fq && p.fq.length) c.f = p.fq;
-  if (p.curated === false) c.c = 0;
-  const bytes = new TextEncoder().encode(JSON.stringify(c));
-  let bin = "";
-  for (const b of bytes) bin += String.fromCharCode(b);
-  return btoa(bin).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
-}
-
-/**
- * Hold results until every cover has decoded. A grid that appears complete
- * reads as considered; one that pops in image by image reads as broken.
- * Each image gets its own cap so one slow cover can't stall the whole page.
- */
-function coverSources(h) {
-  const isbn = h.isbn?.[0];
-  if (!isbn) return [];
-  // Open first, proprietary second.
-  const sources = [`https://covers.openlibrary.org/b/isbn/${isbn}-M.jpg?default=false`];
-  if (SYNDETICS_CLIENT) {
-    sources.push(
-      `https://secure.syndetics.com/index.aspx?isbn=${isbn}/MC.GIF&client=${SYNDETICS_CLIENT}&type=xw12`,
-    );
-  }
-  return sources;
-}
-
-/**
- * Resolves each hit to a cover URL that is known to be a real image, before
- * anything renders. Syndetics answers 200 with an 86-byte 1x1 PNG when it has
- * no jacket, so a load event alone means nothing - the width has to be checked.
- */
-function resolveCover(url, capMs) {
-  return new Promise((res) => {
-    const img = new Image();
-    const done = (ok) => res(ok ? url : null);
-    img.onload = () => done(img.naturalWidth > 1);
-    img.onerror = () => done(false);
-    img.src = url;
-    setTimeout(() => done(false), capMs);
-  });
-}
-
-/** Walks the source list per hit and stashes the winner on the hit itself. */
-async function resolveCovers(hits, capMs = 2500) {
-  await Promise.all(hits.map(async (h) => {
-    h._cover = null;
-    for (const src of coverSources(h)) {
-      const ok = await resolveCover(src, capMs);
-      if (ok) { h._cover = ok; return; }
+      const b = document.createElement("button");
+      b.type = "button";
+      b.setAttribute("aria-pressed", String(filters.has(key)));
+      b.dataset.f = key;
+      const name = document.createElement("span");
+      name.textContent = fmt(v);
+      const count = document.createElement("span");
+      count.className = "n";
+      count.textContent = n.toLocaleString();
+      b.append(name, count);
+      wrap.append(b);
     }
-  }));
-}
-
-const STEPS = [
-  (q) => `Searching 736,455 records for &ldquo;${esc(q)}&rdquo;`,
-  () => "Matching titles, authors and subjects",
-  () => "Collapsing editions and formats",
-  () => "Ranking by relevance and availability",
-];
-
-/** Names the work as it happens; a bare spinner just reads as slow. */
-function startWorking(q) {
-  $results.innerHTML = "";
-  $empty.hidden = true;
-  $working.hidden = false;
-  $steps.innerHTML = STEPS.map((f) => `<li>${f(q)}</li>`).join("");
-  const items = [...$steps.children];
-  let i = 0;
-  items[0]?.classList.add("on");
-  const timer = setInterval(() => {
-    items[i]?.classList.remove("on");
-    items[i]?.classList.add("done");
-    i += 1;
-    if (i < items.length) items[i].classList.add("on");
-    else clearInterval(timer);
-  }, 190);
-  return () => clearInterval(timer);
+    $facets.append(wrap);
+  }
 }
 
 async function go() {
