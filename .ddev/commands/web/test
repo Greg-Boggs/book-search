@@ -1,0 +1,5 @@
+#!/bin/bash
+## Description: Run the test suite (unit + Solr integration)
+## Usage: test [vitest args]
+## Example: "ddev test" or "ddev test --watch"
+cd /var/www/html && npm test -- "$@"

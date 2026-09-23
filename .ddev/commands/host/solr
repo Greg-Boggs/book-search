@@ -1,0 +1,5 @@
+#!/bin/bash
+## Description: Open the Solr admin UI for the bibs core
+## Usage: solr
+## Example: "ddev solr"
+ddev launch :8983/solr/#/bibs

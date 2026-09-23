@@ -1,0 +1,41 @@
+# Solr 9.7 for the books search evaluation.
+# Reachable at http://solr:8983 from the web container,
+# and http://books.ddev.site:8983 from the host.
+services:
+  solr:
+    container_name: ddev-${DDEV_SITENAME}-solr
+    image: solr:9.7
+    restart: "no"
+    expose:
+      - 8983
+    labels:
+      com.ddev.site-name: ${DDEV_SITENAME}
+      com.ddev.approot: $DDEV_APPROOT
+    environment:
+      - VIRTUAL_HOST=$DDEV_HOSTNAME
+      - HTTP_EXPOSE=8983:8983
+      # 1g heap, not 4g: this box has ~5GB free.
+      - SOLR_JAVA_MEM=-Xms512m -Xmx1g
+      - SOLR_MODULES=analysis-extras
+    volumes:
+      - solr:/var/solr
+    # Creates the 'bibs' core from the _default configset on first start.
+    # Our schema is applied as code via the Schema API (see `ddev solr-init`).
+    # Two cores: 'bibs' is the real index, 'bibs_test' is a scratch core for the
+    # integration tests. They MUST stay separate - tests delete everything they
+    # touch, and they must never be pointed at the index the app serves.
+    entrypoint:
+      - bash
+      - -c
+      - "precreate-core bibs; precreate-core bibs_test; exec solr -f"
+    external_links:
+      - "ddev-router:${DDEV_SITENAME}.${DDEV_TLD}"
+    healthcheck:
+      test: ["CMD-SHELL", "curl --fail -s localhost:8983/solr/bibs/admin/ping || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+
+volumes:
+  solr:
+    name: "ddev-${DDEV_SITENAME}_solr"

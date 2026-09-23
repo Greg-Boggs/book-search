@@ -1,0 +1,100 @@
+# =============================================================================
+# Secrets and credentials — never commit
+# =============================================================================
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*_rsa
+*_ed25519
+id_*
+.netrc
+# libilsws config carries live ILSWS credentials with SUPER privilege.
+libilsws.yaml
+libilsws.*.yaml
+
+# =============================================================================
+# Patron data — a privacy incident if it leaks, not just clutter
+# =============================================================================
+# Real patron search queries (GA4 export, ~42k distinct, 1.9M searches).
+*queries*.csv
+data/work/queries.tsv
+data/work/zero-results.tsv
+# Anything exported from GA, the ILS, or a support system.
+export*.csv
+*-export.csv
+
+# =============================================================================
+# Source and derived catalogue data — large, licensed, or both
+# =============================================================================
+data/raw/
+data/work/
+*.jsonl
+*.mrc
+*.marc
+# Open Library dumps are 18GB+.
+ol_dump*.txt.gz
+ol_*.txt.gz
+
+# =============================================================================
+# Vendor documentation — licensed material behind a customer login
+# =============================================================================
+docs/sirsi/
+*symws*-sdk/
+*symws*-sdk.zip
+
+# =============================================================================
+# Dependencies
+# =============================================================================
+node_modules/
+vendor/
+.pnp.*
+.yarn/
+
+# =============================================================================
+# Build output and caches
+# =============================================================================
+dist/
+.astro/
+.output/
+.vercel/
+.netlify/
+*.tsbuildinfo
+coverage/
+.nyc_output/
+.vitest/
+.cache/
+
+# =============================================================================
+# Runtime and local state
+# =============================================================================
+# Solr index data — rebuild it with `npm run solr:schema && npm run solr:index`.
+.ddev/solr/
+solr-data/
+*.log
+*.pid
+tmp/
+.tmp/
+
+# =============================================================================
+# Belongs to another project
+# =============================================================================
+# The designer's concept lives in ~/sites/books-design.
+design-ideas/
+
+# =============================================================================
+# OS and editor
+# =============================================================================
+.DS_Store
+._*
+.Spotlight-V100
+.Trashes
+Thumbs.db
+desktop.ini
+*.swp
+*.swo
+*~
+.idea/
+.vscode/
+!.vscode/extensions.json

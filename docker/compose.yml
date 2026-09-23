@@ -1,0 +1,49 @@
+# Search engines for the BiblioCommons parity evaluation.
+# Runs identically on a workstation or a remote host.
+
+services:
+  opensearch:
+    image: opensearchproject/opensearch:2.17.1
+    container_name: books-opensearch
+    environment:
+      - discovery.type=single-node
+      - bootstrap.memory_lock=true
+      - "OPENSEARCH_JAVA_OPTS=-Xms4g -Xmx4g"
+      # Single-node local eval rig: no TLS, no auth. Not a production posture.
+      - DISABLE_SECURITY_PLUGIN=true
+      - DISABLE_INSTALL_DEMO_CONFIG=true
+    ulimits:
+      memlock: { soft: -1, hard: -1 }
+      nofile:  { soft: 65536, hard: 65536 }
+    ports:
+      - "127.0.0.1:9200:9200"
+    volumes:
+      - opensearch-data:/usr/share/opensearch/data
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:9200/_cluster/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+
+  solr:
+    image: solr:9.7
+    container_name: books-solr
+    environment:
+      - SOLR_JAVA_MEM=-Xms4g -Xmx4g
+      - SOLR_OPTS=-Dsolr.modules=analysis-extras
+    ports:
+      - "127.0.0.1:8983:8983"
+    volumes:
+      - solr-data:/var/solr
+    command:
+      - solr-precreate
+      - bibs
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:8983/solr/admin/info/system || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+
+volumes:
+  opensearch-data:
+  solr-data:

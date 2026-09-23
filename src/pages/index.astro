@@ -1,0 +1,459 @@
+---
+export const prerender = false;
+const TOTAL = 736455;
+/**
+ * Fallback only. Open Library is tried first on principle: open data before
+ * proprietary. Because this is a chain rather than a choice, preferring open
+ * costs no coverage - on a sample of the real index OL answers ~50% of our
+ * ISBNs and Syndetics picks up most of the rest, ~76% combined either way.
+ *
+ * `sepup` is not a credential. It is a public identifier, visible in the page
+ * source of multcolib.org, and Syndetics serves covers without any client
+ * param at all. Measured on 34 real ISBNs: 25 covers with the client, 24
+ * without - it is worth one cover in thirty-four, so it is not worth
+ * protecting, but there is no reason to drop it either.
+ */
+const SYNDETICS_CLIENT = import.meta.env.SYNDETICS_CLIENT ?? "sepup";
+
+/**
+ * Real searches from Multnomah patrons (GA4, Jun-Sep 2026), picked for range
+ * and verified to return strong results against this index. Counts are how
+ * many times each was actually typed in three months.
+ */
+const SUGGESTIONS = [
+  { q: "yesteryear", n: 2615 },
+  { q: "theo of golden", n: 1584 },
+  { q: "dog man", n: 857 },
+  { q: "the odyssey", n: 821 },
+  { q: "jujutsu kaisen", n: 677 },
+  { q: "ann patchett", n: 615 },
+  { q: "east of eden", n: 524 },
+  { q: "dolly parton", n: 510 },
+];
+---
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Catalog search</title>
+<style is:global>
+  :root {
+    --paper: #faf8f4; --ink: #1a1815; --muted: #6b6459;
+    --rule: #e2dcd1; --card: #fff; --accent: #8c2f1f; --shadow: 0 1px 2px rgb(0 0 0 / .05);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --paper: #14120f; --ink: #eae6de; --muted: #968d80;
+      --rule: #2b2721; --card: #1b1814; --accent: #d4674f; --shadow: none;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--paper); color: var(--ink);
+    font: 16px/1.5 ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+    -webkit-font-smoothing: antialiased;
+  }
+  .wrap { max-width: 1180px; margin: 0 auto; padding: 0 24px; }
+  header { padding: 56px 0 8px; }
+  h1 {
+    font: 600 15px/1 ui-sans-serif, system-ui, sans-serif;
+    letter-spacing: .14em; text-transform: uppercase; color: var(--muted); margin: 0 0 22px;
+  }
+  .searchbar { position: relative; }
+  #q {
+    width: 100%; border: 0; border-bottom: 2px solid var(--ink); background: transparent;
+    color: var(--ink); padding: 8px 0 14px;
+    font: 400 clamp(28px, 5vw, 46px)/1.15 ui-serif, Georgia, "Times New Roman", serif;
+    outline: none;
+  }
+  #q::placeholder { color: var(--rule); }
+  .meta {
+    display: flex; gap: 14px; align-items: baseline; flex-wrap: wrap;
+    color: var(--muted); font-size: 13.5px; padding: 14px 0 0; min-height: 34px;
+  }
+  .meta b { color: var(--ink); font-variant-numeric: tabular-nums; font-weight: 600; }
+  .pill {
+    border: 1px solid var(--rule); border-radius: 999px; padding: 2px 10px; font-size: 12px;
+  }
+  .suggest { padding: 26px 0 4px; }
+  .suggest .lbl {
+    display: block; font: 600 11px/1 ui-sans-serif, system-ui, sans-serif;
+    letter-spacing: .12em; text-transform: uppercase; color: var(--muted); margin-bottom: 12px;
+  }
+  .suggest ul {
+    list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: 8px 10px;
+  }
+  .suggest button {
+    font: 400 15px/1 ui-serif, Georgia, serif; font-style: italic;
+    background: none; border: 0; border-bottom: 1px solid var(--rule);
+    color: var(--ink); cursor: pointer; padding: 3px 1px 5px;
+    display: inline-flex; align-items: baseline; gap: 7px; transition: border-color .15s, color .15s;
+  }
+  .suggest button:hover { color: var(--accent); border-bottom-color: var(--accent); }
+  .suggest button i {
+    font-style: normal; font-family: ui-monospace, Menlo, monospace;
+    font-size: 10.5px; color: var(--muted);
+  }
+  main { display: grid; grid-template-columns: 200px 1fr; gap: 40px; padding: 26px 0 80px; }
+  @media (max-width: 800px) { main { grid-template-columns: 1fr; } aside { display: none; } }
+  aside h2 {
+    font: 600 11px/1 ui-sans-serif, system-ui, sans-serif; letter-spacing: .12em;
+    text-transform: uppercase; color: var(--muted); margin: 0 0 10px;
+  }
+  .facet { margin-bottom: 26px; }
+  .facet button {
+    display: flex; justify-content: space-between; gap: 8px; width: 100%;
+    background: none; border: 0; padding: 4px 0; cursor: pointer; text-align: left;
+    color: var(--ink); font-size: 13.5px; font-family: inherit;
+  }
+  .facet button:hover { color: var(--accent); }
+  .facet button[aria-pressed="true"] { color: var(--accent); font-weight: 600; }
+  .facet .n { color: var(--muted); font-variant-numeric: tabular-nums; font-size: 12px; }
+  .results { display: grid; grid-template-columns: repeat(auto-fill, minmax(168px, 1fr)); gap: 30px 24px; }
+  .card { display: flex; flex-direction: column; gap: 10px; }
+  /* Fixed 2:3 box. Never changes size, so nothing below it can shift. */
+  .cover {
+    aspect-ratio: 2/3; border-radius: 3px; overflow: hidden; background: var(--card);
+    box-shadow: var(--shadow); border: 1px solid var(--rule); position: relative;
+  }
+  /* The spine is always rendered underneath. A cover fades in on top of it when
+     it loads; if it 404s it simply never appears. No swap, no reflow, no pop. */
+  .cover img {
+    position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover;
+    display: block; opacity: 0; transition: opacity .3s ease;
+  }
+  .cover img.on { opacity: 1; }
+  .spine {
+    position: absolute; inset: 0; padding: 14px 12px; display: flex;
+    flex-direction: column; justify-content: space-between; gap: 8px;
+  }
+  .spine .t {
+    font: 500 14px/1.25 ui-serif, Georgia, serif;
+    display: -webkit-box; -webkit-line-clamp: 6; -webkit-box-orient: vertical; overflow: hidden;
+  }
+  .spine .a { font-size: 11px; color: var(--muted); }
+  .spine::after {
+    content: ""; position: absolute; inset: 0 auto 0 0; width: 4px; background: var(--sp, var(--accent));
+  }
+  /* Fixed line counts keep every card the same height, so grid rows stay level. */
+  .card .title {
+    font: 500 14.5px/1.35 ui-serif, Georgia, serif; min-height: calc(2 * 1.35em);
+    display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
+  }
+  .card .byline {
+    font-size: 12.5px; color: var(--muted); min-height: 1.5em;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  .card .tags {
+    font-size: 11px; color: var(--muted); min-height: 1.45em;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  /* Deliberate "working" state. Results are held back until every cover has
+     decoded, so the grid appears complete in one piece rather than popping in. */
+  .working { padding: 30px 0 60px; max-width: 52ch; }
+  .working .bar {
+    height: 2px; background: var(--rule); border-radius: 2px; overflow: hidden; margin-bottom: 18px;
+  }
+  .working .bar i {
+    display: block; height: 100%; width: 30%; background: var(--accent);
+    animation: sweep 1.15s cubic-bezier(.45,0,.35,1) infinite;
+  }
+  @keyframes sweep {
+    0% { transform: translateX(-100%); } 100% { transform: translateX(430%); }
+  }
+  .working ol { list-style: none; margin: 0; padding: 0; }
+  .working li {
+    font-size: 13.5px; color: var(--rule); padding: 3px 0;
+    display: flex; gap: 10px; align-items: baseline; transition: color .3s;
+  }
+  .working li::before { content: "·"; color: inherit; }
+  .working li.on { color: var(--muted); }
+  .working li.done { color: var(--ink); }
+  .working li.done::before { content: "✓"; color: var(--accent); font-size: 11px; }
+  .results { animation: rise .32s ease both; }
+  @keyframes rise { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+  @media (prefers-reduced-motion: reduce) {
+    .working .bar i { animation: none; width: 100%; }
+    .results { animation: none; }
+  }
+  .empty { color: var(--muted); padding: 40px 0; max-width: 46ch; }
+  .empty h3 { font: 500 20px/1.3 ui-serif, Georgia, serif; color: var(--ink); margin: 0 0 8px; }
+</style>
+</head>
+<body data-syndetics={SYNDETICS_CLIENT}>
+<div class="wrap">
+  <header>
+    <h1>Catalog</h1>
+    <div class="searchbar">
+      <input id="q" type="search" autocomplete="off" autofocus
+             placeholder="Search the collection" aria-label="Search the collection" />
+    </div>
+    <div class="meta" id="meta">
+      <span><b id="count">{TOTAL.toLocaleString()}</b> items</span>
+    </div>
+    <div class="suggest" id="suggest">
+      <span class="lbl">What people are searching for</span>
+      <ul>
+        {SUGGESTIONS.map((s) => (
+          <li><button type="button" data-q={s.q}>{s.q}<i>{s.n.toLocaleString()}</i></button></li>
+        ))}
+      </ul>
+    </div>
+  </header>
+  <main>
+    <aside id="facets"></aside>
+    <section>
+      <div class="working" id="working" hidden>
+        <div class="bar"><i></i></div>
+        <ol id="steps"></ol>
+      </div>
+      <div class="results" id="results"></div>
+      <div class="empty" id="empty" hidden></div>
+    </section>
+  </main>
+</div>
+
+<script is:inline>
+const $q = document.getElementById("q");
+const $results = document.getElementById("results");
+const $count = document.getElementById("count");
+const $meta = document.getElementById("meta");
+const $facets = document.getElementById("facets");
+const $empty = document.getElementById("empty");
+const $working = document.getElementById("working");
+const $suggest = document.getElementById("suggest");
+const $steps = document.getElementById("steps");
+
+const TOTAL = 736455;
+// Injected server-side; the inline script is not templated by Astro.
+const SYNDETICS_CLIENT = document.body.dataset.syndetics || "";
+let filters = new Set();
+let timer, seq = 0, shown = TOTAL;
+
+const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) =>
+  ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+
+// Animate the count rather than snapping - the collection reshaping is the point.
+// rAF is throttled in background tabs, so fall back to setting it outright;
+// otherwise switching away mid-search leaves a stale number on screen.
+function setCount(to) {
+  const reduce = matchMedia("(prefers-reduced-motion: reduce)").matches;
+  if (document.hidden || reduce) {
+    shown = to;
+    $count.textContent = to.toLocaleString();
+    return;
+  }
+  const from = shown, t0 = performance.now(), dur = 280;
+  shown = to;
+  function step(now) {
+    const p = Math.min((now - t0) / dur, 1);
+    const v = p >= 1 ? to : Math.round(from + (to - from) * (1 - Math.pow(1 - p, 3)));
+    $count.textContent = v.toLocaleString();
+    if (p < 1) requestAnimationFrame(step);
+  }
+  requestAnimationFrame(step);
+}
+
+const FMT = { bk: "Book", cd: "Audio CD", dvd: "DVD", mfc: "Microform",
+  per: "Periodical", mus: "Music score", map: "Map", blu: "Blu-ray", pam: "Pamphlet" };
+
+function hue(s) { let h = 0; for (const c of s) h = (h * 31 + c.charCodeAt(0)) % 360; return h; }
+
+function card(h) {
+  const isbn = h.isbn?.[0];
+  const subj = h.subjects?.[0] ?? h.title ?? "";
+  // Spine underneath, and only a cover we already know is real on top.
+  // width/height are not decorative: browsers derive an intrinsic aspect ratio
+  // from them and reserve the box before the image loads, which still holds if
+  // the CSS ever fails to apply.
+  const art = spine(h, subj) + (h._cover
+    ? `<img width="200" height="300" decoding="async" alt="" class="on" src="${h._cover}" />`
+    : "");
+  const fmts = (h.formats ?? []).map((f) => FMT[f] ?? f).slice(0, 2).join(" · ");
+  return `<article class="card">
+    <div class="cover">${art}</div>
+    <div class="title">${esc(h.title)}</div>
+    <div class="byline">${esc(h.author ?? "")}${h.year ? ` · ${h.year}` : ""}</div>
+    <div class="tags">${esc(fmts)}${h.copies > 1 ? ` · ${h.copies} copies` : ""}</div>
+  </article>`;
+}
+
+function spine(h, subj) {
+  return `<div class="spine" style="--sp:hsl(${hue(subj)} 42% 46%)">
+    <div class="t">${esc(h.title)}</div>
+    <div class="a">${esc(h.author ?? "")}</div>
+  </div>`;
+}
+
+function renderFacets(f) {
+  const groups = [
+    ["Format", "formats", (v) => FMT[v] ?? v],
+    ["Audience", "audiences", (v) => v[0].toUpperCase() + v.slice(1)],
+    ["Branch", "locations", (v) => v],
+  ];
+  $facets.innerHTML = groups.map(([label, field, fmt]) => {
+    const rows = (f[field] ?? []).slice(0, 8);
+    if (!rows.length) return "";
+    return `<div class="facet"><h2>${label}</h2>${rows.map(([v, n]) => {
+      const key = `${field}:"${v}"`;
+      return `<button aria-pressed="${filters.has(key)}" data-f='${esc(key)}'>
+        <span>${esc(fmt(v))}</span><span class="n">${n.toLocaleString()}</span></button>`;
+    }).join("")}</div>`;
+  }).join("");
+}
+
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+/**
+ * Hold results until every cover has decoded. A grid that appears complete
+ * reads as considered; one that pops in image by image reads as broken.
+ * Each image gets its own cap so one slow cover can't stall the whole page.
+ */
+function coverSources(h) {
+  const isbn = h.isbn?.[0];
+  if (!isbn) return [];
+  // Open first, proprietary second.
+  const sources = [`https://covers.openlibrary.org/b/isbn/${isbn}-M.jpg?default=false`];
+  if (SYNDETICS_CLIENT) {
+    sources.push(
+      `https://secure.syndetics.com/index.aspx?isbn=${isbn}/MC.GIF&client=${SYNDETICS_CLIENT}&type=xw12`,
+    );
+  }
+  return sources;
+}
+
+/**
+ * Resolves each hit to a cover URL that is known to be a real image, before
+ * anything renders. Syndetics answers 200 with an 86-byte 1x1 PNG when it has
+ * no jacket, so a load event alone means nothing - the width has to be checked.
+ */
+function resolveCover(url, capMs) {
+  return new Promise((res) => {
+    const img = new Image();
+    const done = (ok) => res(ok ? url : null);
+    img.onload = () => done(img.naturalWidth > 1);
+    img.onerror = () => done(false);
+    img.src = url;
+    setTimeout(() => done(false), capMs);
+  });
+}
+
+/** Walks the source list per hit and stashes the winner on the hit itself. */
+async function resolveCovers(hits, capMs = 2500) {
+  await Promise.all(hits.map(async (h) => {
+    h._cover = null;
+    for (const src of coverSources(h)) {
+      const ok = await resolveCover(src, capMs);
+      if (ok) { h._cover = ok; return; }
+    }
+  }));
+}
+
+const STEPS = [
+  (q) => `Searching 736,455 records for &ldquo;${esc(q)}&rdquo;`,
+  () => "Matching titles, authors and subjects",
+  () => "Collapsing editions and formats",
+  () => "Ranking by relevance and availability",
+];
+
+/** Names the work as it happens; a bare spinner just reads as slow. */
+function startWorking(q) {
+  $results.innerHTML = "";
+  $empty.hidden = true;
+  $working.hidden = false;
+  $steps.innerHTML = STEPS.map((f) => `<li>${f(q)}</li>`).join("");
+  const items = [...$steps.children];
+  let i = 0;
+  items[0]?.classList.add("on");
+  const timer = setInterval(() => {
+    items[i]?.classList.remove("on");
+    items[i]?.classList.add("done");
+    i += 1;
+    if (i < items.length) items[i].classList.add("on");
+    else clearInterval(timer);
+  }, 190);
+  return () => clearInterval(timer);
+}
+
+async function go() {
+  const q = $q.value.trim();
+  const mine = ++seq;
+  if (!q) {
+    $results.innerHTML = ""; $facets.innerHTML = "";
+    $empty.hidden = true; $working.hidden = true;
+    if ($suggest) $suggest.hidden = false;
+    $meta.querySelector(".pill")?.remove();
+    setCount(TOTAL);
+    return;
+  }
+
+  if ($suggest) $suggest.hidden = true;
+  const stop = startWorking(q);
+  const t0 = performance.now();
+
+  const p = new URLSearchParams({ q, rows: "24" });
+  for (const f of filters) p.append("fq", f);
+  let r;
+  try {
+    r = await fetch(`/api/search?${p}`).then((x) => x.json());
+  } catch {
+    stop(); $working.hidden = true;
+    if (mine === seq) {
+      $empty.hidden = false;
+      $empty.innerHTML = `<h3>Search is unavailable</h3><p>The index didn&rsquo;t respond. Try again in a moment.</p>`;
+    }
+    return;
+  }
+  if (mine !== seq) { stop(); return; }
+
+  await resolveCovers(r.hits);
+
+  // Floor the wait so the sequence reads as deliberate rather than flickering.
+  const MIN = 900;
+  const spent = performance.now() - t0;
+  if (spent < MIN) await sleep(MIN - spent);
+  stop();
+  if (mine !== seq) return;
+
+  $working.hidden = true;
+  setCount(r.numFound);
+  $meta.querySelector(".pill")?.remove();
+  const note = r.fuzzy ? "corrected spelling" : `${TOTAL.toLocaleString()} records searched`;
+  $meta.insertAdjacentHTML("beforeend", `<span class="pill">${note}</span>`);
+
+  if (!r.numFound) {
+    $results.innerHTML = "";
+    $empty.hidden = false;
+    $empty.innerHTML = `<h3>Nothing matched &ldquo;${esc(q)}&rdquo;</h3>
+      <p>Try fewer words, or check a name&rsquo;s spelling. The catalog holds
+      ${TOTAL.toLocaleString()} titles &mdash; it may simply not be one of them.</p>`;
+    $facets.innerHTML = "";
+    return;
+  }
+  $empty.hidden = true;
+  $results.innerHTML = r.hits.map(card).join("");
+  renderFacets(r.facets);
+}
+
+$suggest?.addEventListener("click", (e) => {
+  const b = e.target.closest("button[data-q]");
+  if (!b) return;
+  $q.value = b.dataset.q;
+  $q.focus();
+  go();
+});
+$q.addEventListener("input", () => { clearTimeout(timer); timer = setTimeout(go, 260); });
+$facets.addEventListener("click", (e) => {
+  const b = e.target.closest("button[data-f]");
+  if (!b) return;
+  const k = b.dataset.f;
+  filters.has(k) ? filters.delete(k) : filters.add(k);
+  go();
+});
+document.addEventListener("keydown", (e) => {
+  if ((e.metaKey || e.ctrlKey) && e.key === "k") { e.preventDefault(); $q.focus(); $q.select(); }
+});
+</script>
+</body>
+</html>

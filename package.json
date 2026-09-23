@@ -1,0 +1,29 @@
+{
+  "name": "books",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "typecheck": "tsc --noEmit",
+    "ingest": "tsx ingest/build.ts",
+    "solr:schema": "tsx search/schema.ts",
+    "solr:index": "tsx search/index-docs.ts",
+    "dev": "astro dev",
+    "build": "astro build",
+    "preview": "astro preview",
+    "queries": "tsx eval/parse-queries.ts",
+    "eval": "tsx eval/run-queries.ts"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.2",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.2",
+    "vitest": "^2.1.8"
+  },
+  "dependencies": {
+    "@astrojs/node": "^11.1.6",
+    "astro": "^7.3.4",
+    "csv-parse": "^7.0.2"
+  }
+}
