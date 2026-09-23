@@ -15,8 +15,8 @@ async function search(q: string, extra = ""): Promise<any> {
 
 describe("search API", () => {
   it("the index is populated — catches a wiped core", async () => {
-    const r = await search("*");
-    const all = await fetch(`${BASE}/api/search?q=book&rows=1`).then((x) => x.json());
+    const all = await fetch(`${BASE}/api/search?q=book&rows=1`)
+      .then((x) => x.json()) as { numFound: number };
     expect(all.numFound).toBeGreaterThan(1000);
   });
 
@@ -55,5 +55,47 @@ describe("search API", () => {
     const r = await search("zzzqqxxnotarealbook");
     expect(r.numFound).toBe(0);
     expect(r.hits).toEqual([]);
+  });
+});
+
+/**
+ * The CDN in front of production strips query strings, so the path-encoded
+ * route is what the browser actually uses. If this breaks, production search
+ * returns nothing while every query-string test stays green - which is exactly
+ * what happened before this route existed.
+ */
+describe("path-encoded search (CDN-safe)", () => {
+  const enc = (o: Record<string, unknown>) =>
+    Buffer.from(JSON.stringify(o)).toString("base64url");
+
+  async function pathSearch(o: Record<string, unknown>): Promise<any> {
+    const res = await fetch(`${BASE}/api/search/${enc(o)}`);
+    expect(res.ok).toBe(true);
+    return res.json();
+  }
+
+  it("returns the same results as the query-string route", async () => {
+    const viaPath = await pathSearch({ q: "project hail mary", r: 5 });
+    const viaQuery = await fetch(`${BASE}/api/search?q=project+hail+mary&rows=5`)
+      .then((x) => x.json()) as { numFound: number };
+    expect(viaPath.numFound).toBe(viaQuery.numFound);
+    expect(viaPath.hits[0].title.toLowerCase()).toContain("hail mary");
+  });
+
+  it("carries facet filters through the path", async () => {
+    const all = await pathSearch({ q: "cooking", r: 1 });
+    const filtered = await pathSearch({ q: "cooking", r: 1, f: ['formats:"bk"'] });
+    expect(filtered.numFound).toBeGreaterThan(0);
+    expect(filtered.numFound).toBeLessThanOrEqual(all.numFound);
+  });
+
+  it("survives a unicode query", async () => {
+    const r = await pathSearch({ q: "jujutsu kaisen", r: 3 });
+    expect(r.numFound).toBeGreaterThan(0);
+  });
+
+  it("rejects a malformed segment with 400, not a crash", async () => {
+    const res = await fetch(`${BASE}/api/search/!!!not-base64!!!`);
+    expect(res.status).toBe(400);
   });
 });

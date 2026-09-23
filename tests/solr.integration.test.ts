@@ -34,7 +34,10 @@ describe("deleteAll guard", () => {
     // Regression: the integration suite once destroyed the live 'bibs' index
     // because it shared a core with the app. Never again.
     process.env.SOLR_CORE = "bibs";
-    const live = await import("../search/solr.js?guard");
+    // Cache-busting suffix so the module re-reads SOLR_CORE; TS cannot resolve
+    // a query suffix on a specifier, hence the cast.
+    const live = await import(/* @vite-ignore */ "../search/solr.js?guard" as string) as
+      { deleteAll: () => Promise<void> };
     await expect(live.deleteAll()).rejects.toThrow(/refusing to deleteAll/);
     process.env.SOLR_CORE = "bibs_test";
   });

@@ -208,6 +208,21 @@ describe("deinvertAuthor — messy real-world forms", () => {
   it.each([
     ["Fitzgerald, F. Scott (Francis Scott), 1896-1940", "F. Scott Fitzgerald"],
     ["Rombauer, Irma von Starkloff, 1877-1962", "Irma von Starkloff Rombauer"],
+    // Real SPL rows. The trailing comma defeated date-stripping, and an
+    // over-eager cleanup ate the period off the initial.
+    ["Rombauer, Irma S., 1877-1962,", "Irma S. Rombauer"],
+    ["Rombauer, Irma S. (Irma von Starkloff), 1877-1962", "Irma S. Rombauer"],
+    ["Weir, Andy,", "Andy Weir"],
+    ["Tolkien, J. R. R. (John Ronald Reuel), 1892-1973", "J. R. R. Tolkien"],
+    // MARC date qualifiers seen in the real data.
+    ["Davis, Jim, 1945 July 28-", "Jim Davis"],
+    ["Dunn, John, active 1845", "John Dunn"],
+    // Death-only date, no birth year.
+    ["Vélez de Escalante, Silvestre, -1792", "Silvestre Vélez de Escalante"],
+    ["Pearson, Tanya, 1980 or 1981", "Tanya Pearson"],
+    ["Green, Dan, 1975 June 20-", "Dan Green"],
+    ["United States. Census Office. 13th census, 1910.",
+     "United States. Census Office. 13th census"],
     ["Witzleben, Elisabeth von, 1905-", "Elisabeth von Witzleben"],
     ["Smith, John, approximately 1500-1560", "John Smith"],
     ["Doe, Jane, b. 1920", "Jane Doe"],

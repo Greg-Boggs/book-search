@@ -20,11 +20,24 @@ export function deinvertAuthor(author: string): string {
   // Parenthetical name expansions add a second comma and break naive splitting.
   s = s.replace(/\s*\([^)]*\)/g, "");
 
-  // Life dates in their various cataloguing forms, always at the end.
+  // SPL often leaves a trailing comma ("Rombauer, Irma S., 1877-1962,").
+  // Strip separators BEFORE matching dates, or the date pattern never anchors.
+  // Note: commas and semicolons only - a trailing period may belong to an
+  // initial ("Irma S.") and must survive.
+  s = s.replace(/[,;\s]+$/, "");
+
+  // Life dates, in the many shapes cataloguers use. Rather than enumerate
+  // every variant, strip a trailing ", <something that starts with a year>":
+  // that covers "1877-1962", "1945 July 28-", "active 1845", "1961 or 1962",
+  // "approximately 1500-1560" and "b. 1920" in one rule, and also rescues
+  // corporate names like "United States. Census Office. 13th census, 1910."
+  const DATE_TAIL =
+    /,\s*(?:active\s+|approximately\s+|ca\.\s*|b\.\s*|d\.\s*|fl\.\s*)?-?\d{3,4}\b[^,]*$/i;
+  while (DATE_TAIL.test(s)) s = s.replace(DATE_TAIL, "");
+  // A date with no preceding comma ("Rombauer, Irma S. 1877-1962").
   s = s
-    .replace(/,?\s*(b\.|d\.|fl\.|ca\.|approximately)?\s*\d{3,4}\??\s*-\s*(ca\.\s*)?(\d{3,4})?\??\.?\s*$/i, "")
-    .replace(/,?\s*(b\.|d\.|fl\.)\s*\d{3,4}\??\.?\s*$/i, "")
-    .replace(/[,.]\s*$/, "")
+    .replace(/\s+(?:active\s+|approximately\s+|ca\.\s*|b\.\s*|d\.\s*|fl\.\s*)?\d{3,4}\s*-\s*(?:\d{3,4})?\s*[.,]?\s*$/i, "")
+    .replace(/[,;\s]+$/, "")
     .trim();
 
   // Split on the FIRST comma only: everything after it is the forename part.

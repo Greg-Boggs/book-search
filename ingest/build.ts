@@ -55,7 +55,7 @@ for (const acc of bibs.values()) {
   if (doc.year === undefined) stats.noYear++;
   if (!doc.circulating) stats.reference++;
   if (!out.write(JSON.stringify(doc) + "\n")) {
-    await new Promise((r) => out.once("drain", r));
+    await new Promise<void>((r) => out.once("drain", () => r()));
   }
   written++;
 }
