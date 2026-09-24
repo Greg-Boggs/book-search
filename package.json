@@ -16,7 +16,9 @@
     "eval": "tsx eval/run-queries.ts"
   },
   "devDependencies": {
+    "@types/jsdom": "^30.0.0",
     "@types/node": "^22.10.2",
+    "jsdom": "^30.1.1",
     "tsx": "^4.19.2",
     "typescript": "^5.7.2",
     "vitest": "^5.0.1"

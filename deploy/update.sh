@@ -9,20 +9,39 @@ set -euo pipefail
 APP_DIR=/srv/book-search
 APP_USER=books
 
-# SECURITY: the checkout is owned by root and the app account cannot write to
-# it. Deploys run git, npm and the build as root, so anything the app account
-# could modify - git hooks, git config, package scripts - would execute with
-# root privileges on the next release. Making the tree read-only to the app
-# removes that path. Do NOT add a git safe.directory exception here; needing
-# one means ownership has drifted back and the escalation path is open again.
+# SECURITY: the checkout must be root-owned and unwritable by the app account
+# BEFORE anything here executes. Deploys run git, npm and the build as root, so
+# any file the app account can modify - .git/config, .git/hooks/*, package.json
+# scripts, node_modules binaries - would execute with root privileges.
+#
+# Checking only the top directory is not enough: files underneath, including
+# git metadata, can be app-writable while the directory itself looks fine. And
+# fixing permissions AFTER running git is too late. So verify the whole tree,
+# git metadata included, and refuse before executing a single command.
+#
+# Do NOT add a git safe.directory exception to make this pass. Needing one means
+# ownership has drifted and the escalation path is open again.
 cd "$APP_DIR"
-OWNER=$(stat -c '%U' "$APP_DIR")
-if [ "$OWNER" != "root" ]; then
-  echo "REFUSING: $APP_DIR is owned by '$OWNER', not root."
+
+# Symlinks always report lrwxrwxrwx on Linux and their mode is meaningless -
+# the target's permissions govern. Flagging them would make the guard cry wolf,
+# and a guard that cries wolf gets switched off. Ownership is still checked on
+# symlinks, because a link the app account owns could be repointed.
+BAD=$(find "$APP_DIR" \( ! -user root -o \( ! -type l -a -perm /go=w \) \) \
+  -printf '%M %u %p\n' 2>/dev/null | head -5)
+if [ -n "$BAD" ]; then
+  echo "REFUSING TO DEPLOY - the checkout is not root-owned and read-only."
   echo "  An app-account compromise would become root at the next deploy."
-  echo "  Fix: chown -R root:root $APP_DIR && chmod -R go-w $APP_DIR"
+  echo
+  echo "  Offending paths (first 5):"
+  echo "$BAD" | sed 's/^/    /'
+  echo
+  echo "  Fix:  chown -R root:root $APP_DIR && chmod -R go-w $APP_DIR"
   exit 1
 fi
+
+COUNT=$(find "$APP_DIR" | wc -l)
+echo "==> checkout verified: $COUNT paths, all root-owned and not group/world writable"
 
 echo "==> pulling"
 git fetch --quiet origin
@@ -61,4 +80,20 @@ if [ "${HITS:-0}" -lt 1 ]; then
   exit 1
 fi
 echo "    search ok: $HITS hits for 'cooking'"
+
+# An API that answers correctly says nothing about whether the page works: a
+# refactor once deleted client helpers and left every API check green while the
+# browser threw ReferenceError before making a request.
+echo "==> verifying the page still defines its client helpers"
+PAGE=$(curl -sf http://127.0.0.1:4321/ || true)
+MISSING=""
+for fn in go startWorking encodeSearch resolveCovers renderFacets card; do
+  printf '%s' "$PAGE" | grep -q "function $fn" || MISSING="$MISSING $fn"
+done
+if [ -n "$MISSING" ]; then
+  echo "FAILED - the served page is missing:$MISSING"
+  echo "  The API works but the browser will throw before it makes a request."
+  exit 1
+fi
+echo "    page ok: all client helpers present"
 echo "done."
