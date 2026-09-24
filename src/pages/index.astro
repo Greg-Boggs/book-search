@@ -30,6 +30,20 @@ const SUGGESTIONS = [
   { q: "east of eden", n: 524 },
   { q: "dolly parton", n: 510 },
 ];
+
+const REPO = "https://github.com/Greg-Boggs/book-search";
+const SPL_DATASET =
+  "https://data.seattle.gov/Community-and-Culture/Library-Collection-Inventory/6vkj-f5xf/about_data";
+
+/**
+ * Rendered server-side so the footer is complete without JavaScript. The
+ * inline script freshens it from the GitHub API, and stays quiet on failure -
+ * a rate-limited API must not blank out the number already on the page.
+ *
+ * Keep this at the real count. Seeding it high makes the live fetch correct it
+ * downward a moment after paint, which reads as a bug.
+ */
+const STARS = 0;
 ---
 <!doctype html>
 <html lang="en">
@@ -179,6 +193,26 @@ const SUGGESTIONS = [
   }
   .empty { color: var(--muted); padding: 40px 0; max-width: 46ch; }
   .empty h3 { font: 500 20px/1.3 ui-serif, Georgia, serif; color: var(--ink); margin: 0 0 8px; }
+  footer {
+    margin-top: 72px; border-top: 1px solid var(--rule); padding: 26px 0 60px;
+    display: flex; flex-wrap: wrap; gap: 14px 32px; align-items: baseline;
+    justify-content: space-between; color: var(--muted); font-size: 13.5px;
+  }
+  footer p { margin: 0; max-width: 60ch; }
+  footer a {
+    color: var(--ink); text-decoration: underline;
+    text-decoration-color: var(--rule); text-underline-offset: 3px;
+  }
+  footer a:hover { color: var(--accent); text-decoration-color: currentColor; }
+  footer .sep { padding: 0 9px; opacity: .45; }
+  .heart { color: var(--accent); font-style: normal; }
+  .star {
+    display: inline-flex; align-items: center; gap: 7px; white-space: nowrap;
+    border: 1px solid var(--rule); border-radius: 999px; padding: 5px 13px;
+    background: var(--card); box-shadow: var(--shadow); text-decoration: none;
+  }
+  .star:hover { border-color: var(--accent); }
+  .star b { font-variant-numeric: tabular-nums; font-weight: 600; }
 </style>
 </head>
 <body data-syndetics={SYNDETICS_CLIENT}>
@@ -212,6 +246,29 @@ const SUGGESTIONS = [
       <div class="empty" id="empty" hidden></div>
     </section>
   </main>
+  <footer>
+    <!--
+      Keep every opening <a> on the same line as the word before it. Astro trims
+      whitespace at a tag boundary, so a newline between text and a link is
+      dropped entirely and the two words run together.
+    -->
+    <p>
+      Catalog data from the <a href="https://www.spl.org" target="_blank" rel="noopener noreferrer">Seattle Public Library</a>,
+      who publish their whole collection as <a href={SPL_DATASET} target="_blank" rel="noopener noreferrer">open data</a>.
+      Thank you. Browse it the official way in the <a href="https://seattle.bibliocommons.com" target="_blank" rel="noopener noreferrer">SPL catalog</a>.
+    </p>
+    <p>
+      <a href={REPO} target="_blank" rel="noopener noreferrer">Book-Search</a>
+      <span class="sep">·</span>
+      <a href={`${REPO}/blob/main/LICENSE`} target="_blank" rel="noopener noreferrer">GPL-3.0</a>
+      <span class="sep">·</span>
+      Made with <i class="heart" aria-label="love">❤</i> in Portland
+      <span class="sep">·</span>
+      <a class="star" href={REPO} target="_blank" rel="noopener noreferrer">
+        ★ Star <b id="stars">{STARS.toLocaleString()}</b>
+      </a>
+    </p>
+  </footer>
 </div>
 
 <script is:inline>
@@ -492,6 +549,35 @@ $facets.addEventListener("click", (e) => {
 document.addEventListener("keydown", (e) => {
   if ((e.metaKey || e.ctrlKey) && e.key === "k") { e.preventDefault(); $q.focus(); $q.select(); }
 });
+
+// The star count is server-rendered, so the footer is correct with JavaScript
+// off; this only freshens it. The repo is read back off the link's own href
+// rather than written out again - this script is not templated by Astro, so a
+// second copy of the URL would drift from the one in the markup unnoticed.
+//
+// Wrapped in try/catch and gated on `typeof fetch`, because this is decoration
+// at the very bottom of a script that everything above it depends on. A bare
+// `fetch(...)` here throws a synchronous ReferenceError where fetch is absent -
+// which .catch() cannot intercept - and moving this block any higher would then
+// take every helper below it down with it.
+const $stars = document.getElementById("stars");
+const $star = document.querySelector("a.star");
+if ($stars && $star && typeof fetch === "function") {
+  try {
+    fetch(`https://api.github.com/repos${new URL($star.href).pathname}`, {
+      headers: { Accept: "application/vnd.github+json" },
+    })
+      .then((r) => (r.ok ? r.json() : null))
+      // Silent on failure. GitHub rate-limits anonymous callers at 60/hour per
+      // IP, and a throttled response must not blank out the rendered count.
+      .then((d) => {
+        if (d && Number.isFinite(d.stargazers_count)) {
+          $stars.textContent = d.stargazers_count.toLocaleString();
+        }
+      })
+      .catch(() => {});
+  } catch {}
+}
 </script>
 </body>
 </html>

@@ -2,6 +2,11 @@
   "name": "books",
   "private": true,
   "type": "module",
+  "license": "GPL-3.0-or-later",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Greg-Boggs/book-search.git"
+  },
   "scripts": {
     "test": "vitest run",
     "test:watch": "vitest",
