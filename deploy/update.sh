@@ -23,10 +23,10 @@ APP_USER=books
 # ownership has drifted and the escalation path is open again.
 cd "$APP_DIR"
 
-# Symlinks always report lrwxrwxrwx on Linux and their mode is meaningless -
+# Symlinks always report lrwxrwxrwx on Linux and their own mode is meaningless -
 # the target's permissions govern. Flagging them would make the guard cry wolf,
-# and a guard that cries wolf gets switched off. Ownership is still checked on
-# symlinks, because a link the app account owns could be repointed.
+# and a guard that cries wolf gets switched off. Their OWNERSHIP is still
+# checked, because a link the app account owns could be repointed.
 BAD=$(find "$APP_DIR" \( ! -user root -o \( ! -type l -a -perm /go=w \) \) \
   -printf '%M %u %p\n' 2>/dev/null | head -5)
 if [ -n "$BAD" ]; then
@@ -40,8 +40,31 @@ if [ -n "$BAD" ]; then
   exit 1
 fi
 
+# Skipping symlink permissions above would otherwise open a bypass: a
+# ROOT-OWNED link pointing at an app-writable file OUTSIDE the checkout passes
+# both tests, and git or npm would happily follow it. Links resolving inside the
+# checkout are already covered by the walk, so require exactly that. All 13
+# symlinks npm creates here resolve internally; an external one is a red flag.
+ESCAPING=$(find "$APP_DIR" -type l -print 2>/dev/null | while IFS= read -r link; do
+  target=$(readlink -f "$link" 2>/dev/null || echo "<unresolvable>")
+  case "$target" in
+    "$APP_DIR"/*|"$APP_DIR") ;;
+    *) printf '%s -> %s\n' "$link" "$target" ;;
+  esac
+done | head -5)
+if [ -n "$ESCAPING" ]; then
+  echo "REFUSING TO DEPLOY - symlink(s) resolve outside the protected checkout."
+  echo "  A root-owned link to an app-writable file executes as root on deploy."
+  echo
+  echo "$ESCAPING" | sed 's/^/    /'
+  echo
+  echo "  Remove the link, or point it inside $APP_DIR."
+  exit 1
+fi
+
 COUNT=$(find "$APP_DIR" | wc -l)
-echo "==> checkout verified: $COUNT paths, all root-owned and not group/world writable"
+echo "==> checkout verified: $COUNT paths root-owned and not group/world writable,"
+echo "    $(find "$APP_DIR" -type l | wc -l) symlink(s) all resolving inside the checkout"
 
 echo "==> pulling"
 git fetch --quiet origin
