@@ -27,8 +27,11 @@ cd "$APP_DIR"
 # the target's permissions govern. Flagging them would make the guard cry wolf,
 # and a guard that cries wolf gets switched off. Their OWNERSHIP is still
 # checked, because a link the app account owns could be repointed.
+# The trailing `|| true` absorbs find's SIGPIPE when head closes the pipe at
+# five lines. Without it the guard aborts on 141 and never prints the offending
+# paths - failing in the one case it exists to explain.
 BAD=$(find "$APP_DIR" \( ! -user root -o \( ! -type l -a -perm /go=w \) \) \
-  -printf '%M %u %p\n' 2>/dev/null | head -5)
+  -printf '%M %u %p\n' 2>/dev/null | head -5 || true)
 if [ -n "$BAD" ]; then
   echo "REFUSING TO DEPLOY - the checkout is not root-owned and read-only."
   echo "  An app-account compromise would become root at the next deploy."
@@ -51,7 +54,7 @@ ESCAPING=$(find "$APP_DIR" -type l -print 2>/dev/null | while IFS= read -r link;
     "$APP_DIR"/*|"$APP_DIR") ;;
     *) printf '%s -> %s\n' "$link" "$target" ;;
   esac
-done | head -5)
+done | head -5 || true)
 if [ -n "$ESCAPING" ]; then
   echo "REFUSING TO DEPLOY - symlink(s) resolve outside the protected checkout."
   echo "  A root-owned link to an app-writable file executes as root on deploy."
@@ -69,7 +72,12 @@ echo "    $(find "$APP_DIR" -type l | wc -l) symlink(s) all resolving inside the
 echo "==> pulling"
 git fetch --quiet origin
 git reset --hard --quiet origin/main
-git log --oneline | head -1 | sed 's/^/    /'
+# `git log --oneline | head -1` looks equivalent and is not: head closes the
+# pipe after one line, git dies of SIGPIPE, and under `set -o pipefail` that
+# 141 aborts the deploy right here - after printing the commit, so it reads
+# like a success. Let git stop on its own. Same reasoning for every `| head`
+# below. See the note on the helper check at the bottom of this script.
+git log --oneline -1 | sed 's/^/    /'
 
 echo "==> installing"
 npm ci --omit=dev --no-fund --no-audit 2>&1 | tail -2
@@ -110,8 +118,12 @@ echo "    search ok: $HITS hits for 'cooking'"
 echo "==> verifying the page still defines its client helpers"
 PAGE=$(curl -sf http://127.0.0.1:4321/ || true)
 MISSING=""
+# Here-string, not `printf ... | grep -q`. grep -q exits the instant it matches,
+# printf takes SIGPIPE, and pipefail turns that 141 into a failure - so a helper
+# that IS present gets reported missing. It only passes today because these
+# functions sit near the end of the page and grep reads almost all of it.
 for fn in go startWorking encodeSearch resolveCovers renderFacets card; do
-  printf '%s' "$PAGE" | grep -q "function $fn" || MISSING="$MISSING $fn"
+  grep -q "function $fn" <<<"$PAGE" || MISSING="$MISSING $fn"
 done
 if [ -n "$MISSING" ]; then
   echo "FAILED - the served page is missing:$MISSING"
