@@ -126,6 +126,22 @@ const STARS = 0;
   .facet .n { color: var(--muted); font-variant-numeric: tabular-nums; font-size: 12px; }
   .results { display: grid; grid-template-columns: repeat(auto-fill, minmax(168px, 1fr)); gap: 30px 24px; }
   .card { display: flex; flex-direction: column; gap: 10px; }
+  a.card { text-decoration: none; color: inherit; }
+  a.card:focus-visible { outline: 2px solid var(--accent); outline-offset: 5px; border-radius: 4px; }
+  a.card .cover { transition: transform .18s ease, box-shadow .18s ease; }
+  a.card:hover .cover, a.card:focus-visible .cover {
+    transform: translateY(-3px); box-shadow: 0 8px 20px rgb(0 0 0 / .16);
+  }
+  a.card:hover .title, a.card:focus-visible .title { color: var(--accent); }
+  /* Hover/focus affordance only. The whole card is the link, so touch users
+     lose nothing by never seeing it. */
+  .borrow {
+    position: absolute; left: 0; right: 0; bottom: 0; padding: 7px 9px;
+    font: 500 11.5px/1 ui-sans-serif, system-ui, sans-serif; letter-spacing: .05em;
+    text-align: center; color: #fff; background: rgb(0 0 0 / .74);
+    opacity: 0; transition: opacity .18s ease;
+  }
+  a.card:hover .borrow, a.card:focus-visible .borrow { opacity: 1; }
   /* Fixed 2:3 box. Never changes size, so nothing below it can shift. */
   .cover {
     aspect-ratio: 2/3; border-radius: 3px; overflow: hidden; background: var(--card);
@@ -190,6 +206,8 @@ const STARS = 0;
   @media (prefers-reduced-motion: reduce) {
     .working .bar i { animation: none; width: 100%; }
     .results { animation: none; }
+    a.card .cover, .borrow { transition: none; }
+    a.card:hover .cover, a.card:focus-visible .cover { transform: none; }
   }
   .empty { color: var(--muted); padding: 40px 0; max-width: 46ch; }
   .empty h3 { font: 500 20px/1.3 ui-serif, Georgia, serif; color: var(--ink); margin: 0 0 8px; }
@@ -321,8 +339,23 @@ const FMT = { bk: "Book", cd: "Audio CD", dvd: "DVD", mfc: "Microform",
 
 function hue(s) { let h = 0; for (const c of s) h = (h * 31 + c.charCodeAt(0)) % 360; return h; }
 
+/**
+ * Permalink to the record in SPL's own BiblioCommons catalog, where a patron
+ * can actually place the hold. `h.id` is the Symphony bib number and S30C is
+ * Seattle's record prefix; verified against two live records.
+ *
+ * Validated as digits rather than escaped. This value comes from catalogue
+ * data and is interpolated into a URL, where `esc()` - which is built for HTML
+ * text and attributes - would not make something like a `javascript:` payload
+ * safe. A bib number is numeric, so anything else simply gets no link.
+ */
+function splUrl(id) {
+  return /^[0-9]+$/.test(String(id ?? ""))
+    ? `https://seattle.bibliocommons.com/v2/record/S30C${id}`
+    : null;
+}
+
 function card(h) {
-  const isbn = h.isbn?.[0];
   const subj = h.subjects?.[0] ?? h.title ?? "";
   // Spine underneath, and only a cover we already know is real on top.
   // width/height are not decorative: browsers derive an intrinsic aspect ratio
@@ -332,12 +365,15 @@ function card(h) {
     ? `<img width="200" height="300" decoding="async" alt="" class="on" src="${h._cover}" />`
     : "");
   const fmts = (h.formats ?? []).map((f) => FMT[f] ?? f).slice(0, 2).join(" · ");
-  return `<article class="card">
-    <div class="cover">${art}</div>
+  const href = splUrl(h.id);
+  const body = `<div class="cover">${art}${href ? `<span class="borrow">Borrow at SPL ↗</span>` : ""}</div>
     <div class="title">${esc(h.title)}</div>
     <div class="byline">${esc(h.author ?? "")}${h.year ? ` · ${h.year}` : ""}</div>
-    <div class="tags">${esc(fmts)}${h.copies > 1 ? ` · ${h.copies} copies` : ""}</div>
-  </article>`;
+    <div class="tags">${esc(fmts)}${h.copies > 1 ? ` · ${h.copies} copies` : ""}</div>`;
+  // No bib number, no link - the card still renders, it just isn't clickable.
+  if (!href) return `<article class="card">${body}</article>`;
+  return `<a class="card" href="${href}" target="_blank" rel="noopener noreferrer"
+    aria-label="${esc(h.title)} — borrow at the Seattle Public Library">${body}</a>`;
 }
 
 function spine(h, subj) {
